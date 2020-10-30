@@ -1,0 +1,326 @@
+---
+title: "Medation Predafis WMH"
+author: "Eckhard Schlemm"
+output: html_document
+---
+
+```{r include=FALSE}
+require(tidyverse)
+require(ggplot2)
+require(ggbeeswarm)
+require(broom)
+require(MASS)
+require(ordinal)
+```
+
+
+Load data
+```{r}
+load('df.RData')
+str(datamrs_fu)
+```
+Aim is to analyse the relationship between age, WMH, and functional outcome.
+```{r}
+d <- datamrs_fu %>% 
+  dplyr::select(age, wmh_volume, fu_6_mrs, nihss_score, mrs_pre_stroke) %>% 
+  filter(!is.na(fu_6_mrs) & fu_6_mrs!=9 & !is.na(mrs_pre_stroke)) %>% droplevels()
+nrow(d)
+str(d)
+```
+
+## Visualisations
+
+```{r}
+d %>% 
+  ggplot(aes(x = fu_6_mrs, y = age)) +
+  geom_violin() +
+  geom_quasirandom(dodge.width = 0.9, varwidth = TRUE) +
+  theme_minimal()
+
+d %>% 
+  ggplot(aes(x = fu_6_mrs>2, y = age)) +
+  geom_violin(position = position_dodge(width = 0.9)) +
+  geom_quasirandom(dodge.width = 0.9, varwidth = TRUE) +
+  theme_minimal()
+
+d %>% 
+  group_by(fu_6_mrs, age>60) %>% summarise(n2=n(), .groups = 'drop_last') %>%
+  ungroup() %>% group_by(`age > 60`) %>% 
+  mutate(prop = n2 / sum(n2)) %>% 
+  ggplot(aes(x = `age > 60`, y = prop, fill = fu_6_mrs)) +
+  geom_col(position = position_stack()) +
+  coord_flip()
+
+d %>% 
+  group_by(fu_6_mrs>2, age>60) %>% summarise(n2=n(), .groups = 'drop_last') %>%
+  ungroup() %>% group_by(`age > 60`) %>% 
+  mutate(prop = n2 / sum(n2)) %>% 
+  ggplot(aes(x = `age > 60`, y = prop, fill = `fu_6_mrs > 2`)) +
+  geom_col(position = position_stack()) +
+  coord_flip()
+
+
+```
+
+
+
+```{r}
+d %>% 
+  ggplot(aes(x = age, y = wmh_volume)) +
+  geom_point() +
+  scale_y_continuous(trans = 'log', labels = scales::number_format())
+
+d %>% 
+  ggplot(aes(x = age>60, y = wmh_volume)) +
+  geom_violin() +
+  geom_quasirandom(dodge.width = 0.9, varwidth = TRUE) +
+  scale_y_continuous(trans = 'log', labels = scales::number_format())
+```
+```{r}
+d %>% 
+  ggplot(aes(x = fu_6_mrs, y = wmh_volume)) +
+  geom_violin() +
+  geom_quasirandom(dodge.width = 0.9, varwidth = TRUE) +
+  scale_y_continuous(trans = 'log', labels = scales::number_format())
+  
+d %>% 
+  ggplot(aes(x = fu_6_mrs>2, y = wmh_volume)) +
+  geom_violin() +
+  geom_quasirandom(dodge.width = 0.9, varwidth = TRUE) +
+  scale_y_continuous(trans = 'log', labels = scales::number_format())
+```
+
+# Simple models
+```{r}
+clm(fu_6_mrs ~ age, data = d) %>% tidy()
+clm(fu_6_mrs ~ I(age>60), data = d) %>% tidy()
+
+glm(I(fu_6_mrs>2) ~ age, data = d, family = binomial('logit')) %>% tidy()
+glm(I(fu_6_mrs>2) ~ I(age>60), data = d, family = binomial('logit')) %>% tidy()
+
+chisq.test(xtabs(~ I(fu_6_mrs>2) + I(age>60), data = d), correct = FALSE)
+```
+
+
+
+```{r}
+lm(log(wmh_volume) ~ age, data = d) %>% tidy()
+lm(log(wmh_volume) ~ I(age>60), data = d) %>% tidy()
+```
+
+
+```{r}
+clm(fu_6_mrs ~ log(wmh_volume), data = d) %>% tidy()
+glm(fu_6_mrs ~ log(wmh_volume), data = d, family = binomial('logit')) %>% tidy()
+```
+
+# Multivariable models
+```{r}
+clm(fu_6_mrs ~ age + log(wmh_volume), data = d) %>% tidy()
+clm(fu_6_mrs ~ I(age>60) + log(wmh_volume), data = d) %>% tidy()
+
+glm(I(fu_6_mrs>2) ~ age + log(wmh_volume), data = d, family = binomial('logit')) %>% tidy()
+glm(I(fu_6_mrs>2) ~ I(age>60) + log(wmh_volume), data = d, family = binomial('logit')) %>% tidy()
+```
+
+
+# Mediation models
+```{r include=FALSE}
+require(mediation)
+require(medflex)
+dd <- d %>% 
+  mutate(ageBIN = age > 60
+         , mrsBIN = fu_6_mrs > 2
+         , logwmh = log(wmh_volume))
+ddd <- dd %>% mutate(across(c('ageBIN', 'mrsBIN'), as.factor))
+```
+
+
+## Binary - binary
+```{r}
+model.m <- lm(logwmh ~ ageBIN, data = ddd)
+model.y <- glm(mrsBIN ~ ageBIN + logwmh, data = ddd, family = binomial)
+
+mm <- mediate(model.m = model.m
+                , model.y = model.y
+                , treat = 'ageBIN', mediator = 'logwmh'
+                , boot= T, boot.ci.type = 'perc', sims = 1e3)
+summary(mm)
+```
+```{r}
+expData <- neImpute(mrsBIN ~ ageBIN + logwmh, family = binomial("logit"), data = ddd)
+neMod <- neModel(mrsBIN ~ ageBIN0 + ageBIN1 , family = binomial("logit"), expData = expData, se = "robust")
+head(expData)
+summary(neMod)
+
+expData <- neWeight(logwmh ~ ageBIN, family = gaussian(), data = ddd)
+neMod <- neModel(mrsBIN ~ ageBIN0 + ageBIN1 , family = binomial("logit"), expData = expData, se = "robust")
+head(expData)
+summary(neMod)
+```
+
+## Binary - ordinal
+```{r}
+model.m <- lm(logwmh ~ ageBIN, data = ddd)
+model.y <- polr(fu_6_mrs ~ ageBIN + logwmh, data = ddd)
+
+mm <- mediate(model.m = model.m
+                , model.y = model.y
+                , treat = 'ageBIN', mediator = 'logwmh'
+                , boot= T, boot.ci.type = 'perc', sims = 1e3)
+summary(mm)
+
+Q <- mm$d1^2%>% sum()
+deltaI <- t(mm$d1.sims %>% t() - mm$d1)
+QQ <- apply(deltaI, 1, function(x)(sum(x^2)))
+p <- mean(QQ > Q)
+p
+quantile(QQ-Q, probs = c(0.025, 0.975))
+mm$d0/mm$tau.coef
+```
+
+## Numerical -- binary
+```{r}
+model.m <- lm(logwmh ~ age, data = ddd)
+model.y <- glm(mrsBIN ~ age + logwmh, data = ddd, family = binomial)
+
+mm <- mediate(model.m = model.m
+                , model.y = model.y
+                , treat = 'age', mediator = 'logwmh'
+                , boot= T, boot.ci.type = 'perc', sims = 1e3)
+summary(mm)
+```
+```{r}
+expData <- neImpute(mrsBIN ~ age + logwmh, family = binomial("logit"), data = ddd)
+neMod <- neModel(mrsBIN ~ age0 + age1 , family = binomial("logit"), expData = expData, se = "robust")
+head(expData)
+summary(neMod)
+
+expData <- neWeight(logwmh ~ age, family = gaussian(), data = dd)
+neMod <- neModel(mrsBIN ~ age0 + age1 , family = binomial("logit"), expData = expData, se = "robust")
+head(expData)
+summary(neMod)
+```
+
+## Numerical -- ordinal
+```{r}
+model.m <- lm(logwmh ~ age, data = ddd)
+model.y <- polr(fu_6_mrs ~ age + logwmh, data = ddd)
+
+mm <- mediate(model.m = model.m
+                , model.y = model.y
+                , treat = 'age', mediator = 'logwmh'
+                , boot= T, boot.ci.type = 'perc', sims = 1e3)
+summary(mm)
+
+Q <- mm$d1^2%>% sum()
+deltaI <- t(mm$d1.sims %>% t() - mm$d1)
+QQ <- apply(deltaI, 1, function(x)(sum(x^2)))
+p <- mean(QQ > Q)
+p
+quantile(QQ-Q, probs = c(0.025, 0.975))
+mm$d0/mm$tau.coef
+```
+
+
+# Mediation models incl covariates
+```{r include=FALSE}
+require(mediation)
+require(medflex)
+dd <- d %>% 
+  mutate(ageBIN = as.factor(age > 60)
+         , mrsBIN = as.factor(fu_6_mrs > 2)
+         , logwmh = log(wmh_volume))
+
+covs <- c('nihss_score', 'mrs_pre_stroke')
+```
+
+
+## Binary - binary
+```{r}
+model.m <- lm(as.formula(paste0('logwmh ~ ageBIN +', paste(covs, collapse = '+'))), data = dd)
+model.y <- glm(as.formula(paste0('mrsBIN ~ ageBIN + logwmh +', paste(covs, collapse = '+'))), data = dd, famil = binomial)
+
+mm <- mediate(model.m = model.m
+                , model.y = model.y
+                , treat = 'ageBIN', mediator = 'logwmh'
+                , boot= T, boot.ci.type = 'perc', sims = 1e3)
+summary(mm)
+```
+```{r}
+expData <- neImpute(as.formula(paste0('mrsBIN ~ ageBIN + logwmh +', paste(covs, collapse = '+'))), family = binomial("logit"), data = dd)
+neMod <- neModel(as.formula(paste0('mrsBIN ~ ageBIN0 + ageBIN1 +', paste(covs, collapse = '+'))) , family = binomial("logit"), expData = expData, se = "robust")
+head(expData)
+summary(neMod)
+
+expData <- neWeight(as.formula(paste0('logwmh ~ ageBIN +', paste(covs, collapse = '+'))), family = gaussian(), data = dd)
+neMod <- neModel(as.formula(paste0('mrsBIN ~ ageBIN0 + ageBIN1 +', paste(covs, collapse = '+'))) , family = binomial("logit"), expData = expData, se = "robust")
+head(expData)
+summary(neMod)
+```
+
+## Binary - ordinal
+```{r}
+model.m <- lm(as.formula(paste0('logwmh ~ ageBIN +', paste(covs, collapse = '+'))), data = dd)
+model.y <- polr(as.formula(paste0('fu_6_mrs ~ ageBIN + logwmh +', paste(covs, collapse = '+'))), data = dd)
+
+mm <- mediate(model.m = model.m
+                , model.y = model.y
+                , treat = 'ageBIN', mediator = 'logwmh'
+                , boot= T, boot.ci.type = 'perc', sims = 1e3)
+summary(mm)
+
+Q <- mm$d1^2%>% sum()
+deltaI <- t(mm$d1.sims %>% t() - mm$d1)
+QQ <- apply(deltaI, 1, function(x)(sum(x^2)))
+p <- mean(QQ > Q)
+p
+quantile(QQ-Q, probs = c(0.025, 0.975))
+mm$d0/mm$tau.coef
+```
+
+## Numerical -- binary
+```{r}
+model.m <- lm(as.formula(paste0('logwmh ~ age +', paste(covs, collapse = '+'))), data = dd)
+model.y <- glm(as.formula(paste0('mrsBIN ~ age + logwmh +', paste(covs, collapse = '+'))), data = dd, famil = binomial)
+
+mm <- mediate(model.m = model.m
+                , model.y = model.y
+                , treat = 'age', mediator = 'logwmh'
+                , control.value = 40, treat.value = 80 
+                , boot= T, boot.ci.type = 'perc', sims = 1e3)
+summary(mm)
+
+
+expData <- neImpute(as.formula(paste0('mrsBIN ~ age + logwmh + ', paste(covs, collapse = '+'))), family = binomial("logit"), data = dd)
+neMod <- neModel(as.formula(paste0('mrsBIN ~ age0 + age1 + ', paste(covs, collapse = '+'))) , family = binomial("logit"), expData = expData, se = "robust")
+head(expData)
+summary(neMod)
+
+expData <- neWeight(as.formula(paste0('logwmh ~ age + ', paste(covs, collapse = '+'))), family = gaussian(), data = dd)
+neMod <- neModel(as.formula(paste0('mrsBIN ~ age0 + age1 + ', paste(covs, collapse = '+'))), family = binomial("logit"), expData = expData, se = "robust")
+head(expData)
+summary(neMod)
+```
+
+## Numerical -- ordinal
+
+```{r}
+model.m <- lm(as.formula(paste0('logwmh ~ age +', paste(covs, collapse = '+'))), data = dd)
+model.y <- polr(as.formula(paste0('fu_6_mrs ~ age + logwmh +', paste(covs, collapse = '+'))), data = dd)
+
+mm <- mediate(model.m = model.m
+                , model.y = model.y
+                , treat = 'age', mediator = 'logwmh'
+                , boot= T, boot.ci.type = 'perc', sims = 1e3)
+summary(mm)
+
+Q <- mm$d1^2%>% sum()
+deltaI <- t(mm$d1.sims %>% t() - mm$d1)
+QQ <- apply(deltaI, 1, function(x)(sum(x^2)))
+p <- mean(QQ > Q)
+p
+quantile(QQ-Q, probs = c(0.025, 0.975))
+mm$d0/mm$tau.coef
+```
+

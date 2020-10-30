@@ -1,0 +1,29 @@
+"0","require(medflex)
+"
+"2","Loading required package: medflex
+"
+"2","Loading required package: multcomp
+"
+"2","Loading required package: survival
+"
+"2","Loading required package: TH.data
+"
+"2","
+Attaching package: ‘TH.data’
+
+"
+"2","The following object is masked from ‘package:MASS’:
+
+    geyser
+
+"
+"2","Registered S3 methods overwritten by 'car':
+  method                          from
+  influence.merMod                lme4
+  cooks.distance.influence.merMod lme4
+  dfbeta.influence.merMod         lme4
+  dfbetas.influence.merMod        lme4
+"
+"2","medflex 0.6-6: Flexible Mediation Analysis Using Natural Effect Models
+Please report bugs here: github.com/jmpsteen/medflex/issues
+"

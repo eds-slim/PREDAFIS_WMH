@@ -1,0 +1,9 @@
+"0","mm <- mediate(model.m = model.m
+                , model.y = model.y
+                , treat = 'ageBIN', mediator = 'logwmh'
+                , boot= T, boot.ci.type = 'perc', sims = 1e3)
+"
+"2","treatment and control values do not match factor levels; using FALSE and TRUE as control and treatment, respectively"
+"2","Running nonparametric bootstrap
+
+"
